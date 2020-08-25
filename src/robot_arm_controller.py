@@ -79,18 +79,39 @@ class Impedance_control():
         self.cur_orientation=self.limb.endpoint_pose()['orientation']
 
         #compute deviation
+        error=[]
+        error.append(self.ref_position.x-self.cur_poistion.x)
+        error.append(self.ref_position.y-self.cur_poistion.y)
+        error.append(self.ref_position.z-self.cur_poistion.z)
+        error.append(self.ref_orientation.x-self.cur_orientation.x)
+        error.append(self.ref_orientation.y-self.cur_orientation.y)
+        error.append(self.ref_orientation.z-self.cur_orientation.z)
+        error=np.array(error).reshape(6,1)
+
+        error_dot=[]
+        #get joint velocities
+        cur_dq=self.limb.joint_velocities()
+        for name in self.joint_names:
+            error_dot.append(cur_dq[name])
+        error_dot=np.array(error_dot).reshape(7,1)
+        d_error=np.dot(J,error_dot)
+
+        wrench=np.dot(self.P,error) + np.dot(self.D, d_error)
+        tau_task=np.dot(J.T,wrench) 
+        #TODO: add coriolis
+        tau_command=tau_task
+
+        self.limb.set_joint_torques(dict(zip(self.joint_names,tau_command)))
+
+    # def publish_function(self,arg):
         
-
-
-    def publish_function(self,arg):
+    #     PLACEHOLDER
         
-        data=1
-        
-        self.publisher_name.publish(data)
+    #     self.publisher_name.publish(data)
 
-    def subscriber_callback(self,data):
+    # def subscriber_callback(self,data):
 
-        data+=1
+    #     PLACEHOLDER
 
 def main():
     rospy.init_node("robot_arm_controller")
