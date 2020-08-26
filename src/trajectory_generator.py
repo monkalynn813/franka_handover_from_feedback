@@ -79,10 +79,10 @@ class Trajectory_Generator():
              # ############################################################
         target_pose= se3_to_msg(T_standby)
         self.arm_group.set_pose_target(target_pose)
-        self.arm_group.go(wait=True) #TODO: test with false
+        self.arm_group.go(wait=True) 
         # self.arm_group.stop()
         self.arm_group.clear_pose_targets()
-        
+
     
     def test_joint_pos_command(self):
         joint_goal = self.arm_group.get_current_joint_values()
