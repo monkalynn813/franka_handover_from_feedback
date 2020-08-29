@@ -85,7 +85,7 @@ class Trajectory_Generator():
         #TODO more detail needed for robot hand pose relative to human hand
         target_pose=msg_to_se3(hand_pose)
 
-        joint_target,success=IKinSpace(self.Slist,self.M,target_pose,cur_joint_pos,0.01,0.005)
+        joint_target,success=IKinSpace(self.Slist,self.M,target_pose,np.array(cur_joint_pos),0.01,0.005)
         if success:
             self.traj_publisher.publish(list(joint_target))
         else:
