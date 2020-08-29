@@ -61,7 +61,7 @@ class Impedance_control():
             #in case trajectory is not published yet
             self.go_static_test_pose()
             self.get_reference_pose(mode='static')
-            self.subscribe_flag=0
+            self.subscribe_flag=0.01
             self.Trajectory_listener = rospy.Subscriber('robot_trajectory',RobotTrajectory, self.decompose_trajectory)
         
         # rate=rospy.Rate(800) 
@@ -108,10 +108,10 @@ class Impedance_control():
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
 
-        T_standby=np.array([[-0.1815108 , -0.98090692,  0.06982443, -0.15],
-                            [ 0.00259123,  0.07052656,  0.99750654,  0.5],
-                            [-0.98338554,  0.18123914, -0.01025958,  0.5],
-                            [ 0.        ,  0.        ,  0.        ,  1. ]])
+        # T_standby=np.array([[-0.1815108 , -0.98090692,  0.06982443, -0.15],
+        #                     [ 0.00259123,  0.07052656,  0.99750654,  0.5],
+        #                     [-0.98338554,  0.18123914, -0.01025958,  0.5],
+        #                     [ 0.        ,  0.        ,  0.        ,  1. ]])
 
         T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
                         [ -1/sqrt(2), -1/sqrt(2), 0,   0],
@@ -131,7 +131,7 @@ class Impedance_control():
         #get Jacobian
         J = self.limb.zero_jacobian()
         
-        #in case get delta_joint_position; delta_joint_velocities; delta_joint_accelerations directly from the planner
+        #in case get delta_joint_position; delta_joint_velocities directly from the planner
         if type(ref_pose) != list:
             #compute deviation in joint positions
             cur_joint_pos=[]
