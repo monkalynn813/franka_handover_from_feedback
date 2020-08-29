@@ -10,7 +10,7 @@ import tf_conversions.posemath as pm
 
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
-import moveit_msgs.msg
+from  moveit_msgs.msg import RobotTrajectory
 import geometry_msgs.msg
 from moveit_commander.conversions import pose_to_list
 from std_msgs.msg import String, Bool
@@ -32,7 +32,7 @@ class Trajectory_Generator():
     def __init__(self,dmin=None,dmax=None):
         """
         arguments:
-            dmin: the distance indicates robot to move along with visual human hand position
+            dmin: the distance indicates robot to move along with virtual human hand position
             dmax: the distance indicates robot to start move along with human hand position
             T_ch: the transformation matrix of human hand w.r.t. depth camera frame
         """
@@ -52,22 +52,19 @@ class Trajectory_Generator():
 
         self.T_bh= np.zeros([4,4])
         #publisher:
-        # self.publisher_name = rospy.Publisher('topic_name',String)
+        self.traj_publisher = rospy.Publisher('robot_trajectory',RobotTrajectory,queue_size=10)
 
-        self.go_standby_position()
-        rospy.sleep(2.0)
+        # self.go_standby_position()
+        # rospy.sleep(2.0)
 
         #subscriber:
-        self.hand_pose_subscriber = rospy.Subscriber('visual_hand_pose',Pose, self.compute_hand_in_robotbase)
+        self.hand_pose_subscriber = rospy.Subscriber('virtual_hand_pose',Pose, self.traj_to_target_pose)
         
-        # self.rate=rospy.Rate(30) #update at 30hz
-
-        
-        
+          
     
     def go_standby_position(self):
         rospy.loginfo("--moving to standby position---")
-        ##########for visual hand position test purpose#############
+        ##########for virtual hand position test purpose#############
         radius= 0.15
         circle_center=[0,0.65] #(x,z)
         x=circle_center[0]-radius
@@ -86,45 +83,34 @@ class Trajectory_Generator():
     
     def test_joint_pos_command(self):
         joint_goal = self.arm_group.get_current_joint_values()
-        joint_goal[0] += 0
-        joint_goal[1] += -pi/8
-        joint_goal[2] += 0
-        joint_goal[3] += -pi/8
-        joint_goal[4] += 0
-        joint_goal[5] += pi/8
-        joint_goal[6] += 0
+        joint_goal[0] = 0
+        joint_goal[1] = -pi/4
+        joint_goal[2] = 0
+        joint_goal[3] = -3*pi/2
+        joint_goal[4] = 0
+        joint_goal[5] = pi/2
+        joint_goal[6] = pi/4
 
         self.panda_moveit_wrap.go_to_joint_positions(joint_goal)
     
-    def compute_hand_in_robotbase(self,pose):
-        T_ch=msg_to_se3(pose)
-        self.T_bh= np.dot(self.T_bc,T_ch)
+    def traj_to_target_pose(self,hand_pose):                 
+        #get current ee pose
+        cur_pose= se3_to_msg(self.limb.car_pose_trans_mat)
 
-
-        #get distance
-        d=self.get_current_distance()
-        # if d < dmax:
-        self.update_target_pose()
-        # else:
-        #     self.go_standby_position()
-
-        # self.rate.sleep()   
-
-    def update_target_pose(self):                 
-        #compute target SE3 of end-effector w.r.t robot base
-        target_T_be= self. T_bh #TODO: more detail position w.r.t human hand
-        target_pose= se3_to_msg(target_T_be)
-        self.arm_group.set_pose_target(target_pose)
-        self.arm_group.go(wait=True)
-        # self.arm_group.stop()
-        self.arm_group.clear_pose_targets()
-
-    
-    # def publish_function(self,arg):
+        #compute robot target pose
+        #TODO more detail needed to compute robot target pose from human pose
+        target_pose=hand_pose
         
-    #     data=1
-        
-    #     self.publisher_name.publish(data)
+        #add waypoints in this trajectory
+        waypoints=[]
+        #append only start/current and end/target pose for now
+        waypoints.append(cur_pose)
+        waypoints.append(target_pose)
+
+        #compute cartesian plan
+        traj_plan=RobotTrajectory()
+        (traj_plan,fraction)=self.arm_group.compute_cartesian_path(waypoints, 0.02, 0.0)
+        self.traj_publisher.publish(traj_plan)
 
 
 

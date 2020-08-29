@@ -9,17 +9,24 @@ import numpy as np
 import tf.transformations as tr
 import tf_conversions.posemath as pm
 from trajectory_generator import msg_to_se3, se3_to_msg
+import time
 
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
-import moveit_msgs.msg
+from  moveit_msgs.msg import RobotTrajectory
 from moveit_commander.conversions import pose_to_list
 from std_msgs.msg import String, Bool
 
 
 
 class Impedance_control():
-    def __init__(self,ptx=150,pty=150,ptz=150,pr=10,mode='static'):
+    def __init__(self,ptx=150,pty=150,ptz=150,pr=10,mode='static',tra_update_rate=1):
+        """
+        param:
+        ptx,pty,ptz: translational stiffness at end-effector 
+        pr: all rotatinal stiffness at end-effector
+        tra_update_rate: the update rate of the receiving trajectory
+        """
         #set stiffness:
         self.P = np.zeros([6,6])
         np.fill_diagonal(self.P,[ptx,pty,ptz,pr,pr,pr])
@@ -30,26 +37,40 @@ class Impedance_control():
         
 
         self.mode=mode
+        self.tra_update_rate=tra_update_rate
 
         self.joint_names=['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
         self.limb = ArmInterface()
         
         self.set_collisionBehavior()
 
+        
+        self.panda_moveit_wrap = PandaMoveGroupInterface()
+        self.arm_group=self.panda_moveit_wrap._arm_group
+
         if mode =='static':
-            self.panda_moveit_wrap = PandaMoveGroupInterface()
-            self.arm_group=self.panda_moveit_wrap._arm_group
-            self.get_reference_pose()
+            self.go_static_test_pose()
+            self.get_reference_pose(mode)
+
+
         #publisher:
         # self.publisher_name = rospy.Publisher('topic_name',String)
 
         #subscriber:
-        # self.subscriber_name = rospy.Subscriber('topic_name',String, self.subscriber_callback)
+        if mode =='dynamic':
+            #in case trajectory is not published yet
+            self.go_static_test_pose()
+            self.get_reference_pose(mode='static')
+            self.subscribe_flag=0
+            self.Trajectory_listener = rospy.Subscriber('robot_trajectory',RobotTrajectory, self.decompose_trajectory)
         
         # rate=rospy.Rate(800) 
+            
         while not rospy.is_shutdown():
-            self.control_loop(self.ref_position,self.ref_orientation)
-            # break
+            if mode == 'dynamic':
+                self.get_reference_pose(mode)
+            self.control_loop(self.ref_pose,self.ref_vel)
+        #     # break
             # rate.sleep()
     def set_collisionBehavior(self):
         self.collision=CollisionBehaviourInterface()
@@ -59,21 +80,31 @@ class Impedance_control():
         force_upper=[100.0]*6
         self.collision.set_ft_contact_collision_behaviour(torque_lower,torque_upper,
                                                           force_lower,force_upper)
-
-    def get_reference_pose(self,target_pose=None):
-        #target_pose= geometry_msgs/Pose
-        if self.mode=='static':
-            self.go_static_test_pose()
-            rospy.sleep(2.0)
-            rospy.loginfo('---Moved to static test pose----')
-            self.ref_position=se3_to_msg(self.limb.car_pose_trans_mat).position
-            self.ref_orientation=se3_to_msg(self.limb.car_pose_trans_mat).orientation
-            self.ref_velocities= np.array([0,0,0,0,0,0,0])
-        elif self.mode=='dynamic':
-            self.ref_position=target_pose.position
-            self.ref_orientation=target_pose.orientation
-
+    def decompose_trajectory(self,traj):
+        self.subscribe_flag=1
+        self.traj_poses=traj.joint_trajectory.points
         
+        #compute time to move to next pose
+        self.time = 1/(self.tra_update_rate*len(self.traj_poses))
+        self.pose_index=0
+        self.now=time.time()
+
+    def get_reference_pose(self,mode):
+        #target_pose= geometry_msgs/Pose
+        if mode=='static':
+            ref_position=se3_to_msg(self.limb.car_pose_trans_mat).position
+            ref_orientation=se3_to_msg(self.limb.car_pose_trans_mat).orientation
+            
+            self.ref_pose=[ref_position,ref_orientation]
+            self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
+        
+        if mode =='dynamic' and self.subscribe_flag==1:
+            if time.time()-self.now >= self.time and self.pose_index<7:
+                    self.pose_index+=1
+                    self.now=time.time()
+            self.ref_pose=np.array(self.traj_poses[self.pose_index].positions).reshape(7,)
+            self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
+
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
 
@@ -82,80 +113,90 @@ class Impedance_control():
                             [-0.98338554,  0.18123914, -0.01025958,  0.5],
                             [ 0.        ,  0.        ,  0.        ,  1. ]])
 
+        T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
+                        [ -1/sqrt(2), -1/sqrt(2), 0,   0],
+                        [0,  0, -1,  0.52],
+                        [ 0, 0, 0,  1 ]])
         target_pose= se3_to_msg(T_standby)
         self.arm_group.set_pose_target(target_pose)
         self.arm_group.go(wait=True) 
         self.arm_group.stop()
         self.arm_group.clear_pose_targets()
+        rospy.sleep(2.0)
     
-    def control_loop(self,ref_position,ref_orientation):
+    def control_loop(self,ref_pose,ref_vel):
         #get coriolis
         coriolis=self.limb.get_coriolis()
 
         #get Jacobian
         J = self.limb.zero_jacobian()
-        self.cur_poistion=se3_to_msg(self.limb.car_pose_trans_mat).position
-        self.cur_orientation=se3_to_msg(self.limb.car_pose_trans_mat).orientation
-
-        #compute deviation in position
-        error=[]
-        error.append(ref_position.x-self.cur_poistion.x)
-        error.append(ref_position.y-self.cur_poistion.y)
-        error.append(ref_position.z-self.cur_poistion.z)
-        error.append(self.ref_orientation.x-self.cur_orientation.x)
-        error.append(self.ref_orientation.y-self.cur_orientation.y)
-        error.append(self.ref_orientation.z-self.cur_orientation.z)
-        error=np.array(error).reshape(6,1)
-
-        #compute deviation in velocity
-        # #TODO: get reference velocity (for static = 0 )
-        err_dot=[]
-        #get joint velocities
-        cur_dq=self.limb.joint_velocities()
-        for name in self.joint_names:
-            err_dot.append(cur_dq[name])
-        err_dot=np.array(err_dot).reshape(7,1)
-        d_error=np.dot(J,err_dot)
-
-        #alternative: get_cartesian_velocity
-        # cur_vel_trans=self.limb.endpoint_velocity()['linear']
-        # cur_vel_rotat=self.limb.endpoint_velocity()['angular']
-        # err_dot.append(cur_vel_trans[0]) #TODO: get reference velocity (for static = 0 )
-        # err_dot.append(cur_vel_trans[1])
-        # err_dot.append(cur_vel_trans[2])
-        # err_dot.append(cur_vel_rotat[0])
-        # err_dot.append(cur_vel_rotat[1])
-        # err_dot.append(cur_vel_rotat[2])
-        # d_error=np.array(err_dot).reshape(6,1)
         
-        #TODO compute deviation in acceleration
+        #in case get delta_joint_position; delta_joint_velocities; delta_joint_accelerations directly from the planner
+        if type(ref_pose) != list:
+            #compute deviation in joint positions
+            cur_joint_pos=[]
+            #get current joint position
+            cur_q=self.limb.joint_angles()
+            for name in self.joint_names:
+                cur_joint_pos.append(cur_q[name]) 
+            
+            delta_q=(ref_pose-np.array(cur_joint_pos)).reshape(7,1)
+            error=np.dot(J,delta_q).reshape(6,1)
 
-        wrench=np.dot(self.P,error) - np.dot(self.D, d_error)
+            #compute deviation in joint velocities      
+            cur_joint_vel=[]
+            #get joint velocities
+            cur_dq=self.limb.joint_velocities()
+            for name in self.joint_names:
+                cur_joint_vel.append(cur_dq[name]) 
+
+            delta_q_dot=(ref_vel-np.array(cur_joint_vel)).reshape(7,1)
+            err_dot=np.dot(J,delta_q_dot).reshape(6,1)
+
+            #TODO: add internia term
+
+            
+        else:
+            ref_position=ref_pose[0]
+            ref_orientation=ref_pose[1]
+            ref_ee_vel=ref_vel
+
+            #get current ee cartesian pose
+            cur_poistion=se3_to_msg(self.limb.car_pose_trans_mat).position
+            cur_orientation=se3_to_msg(self.limb.car_pose_trans_mat).orientation
+            
+            #compute deviation in position
+            error=[]
+            error.append(ref_position.x-cur_poistion.x)
+            error.append(ref_position.y-cur_poistion.y)
+            error.append(ref_position.z-cur_poistion.z)
+            error.append(ref_orientation.x-cur_orientation.x)
+            error.append(ref_orientation.y-cur_orientation.y)
+            error.append(ref_orientation.z-cur_orientation.z)
+            error=np.array(error).reshape(6,1)
+
+            #compute deviation in velocity         
+            cur_joint_vel=[]
+            #get joint velocities
+            cur_dq=self.limb.joint_velocities()
+            for name in self.joint_names:
+                cur_joint_vel.append(cur_dq[name])      
+            cur_ee_vel=np.dot(J,np.array(cur_joint_vel).reshape(7,1))
+            err_dot=(ref_ee_vel-np.array(cur_ee_vel).reshape(6,)).reshape(6,1)
+                       
+            #TODO compute deviation in acceleration
+
+        wrench=np.dot(self.P,error) + np.dot(self.D, err_dot)
         tau_task=np.dot(J.T,wrench)
-        #add coriolis
+            #add coriolis
         tau_command=list(tau_task.reshape(7,1)+coriolis.reshape(7,1))
-
-        # print(d_error)
-        
-
-       
-
         self.limb.set_joint_torques(dict(zip(self.joint_names,tau_command)))
 
-    # def publish_function(self,arg):
-        
-    #     PLACEHOLDER
-        
-    #     self.publisher_name.publish(data)
-
-    # def subscriber_callback(self,data):
-
-    #     PLACEHOLDER
 
 def main():
     rospy.init_node("robot_arm_controller")
     try:
-        impedance_ctrl=Impedance_control()  #if program run from init, otherwise put starting function
+        impedance_ctrl=Impedance_control(mode='dynamic')  #if program run from init, otherwise put starting function
         
     except rospy.ROSInterruptException:pass
         
