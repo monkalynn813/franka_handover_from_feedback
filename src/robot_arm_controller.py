@@ -15,7 +15,7 @@ import time
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
 from  moveit_msgs.msg import RobotTrajectory
 from moveit_commander.conversions import pose_to_list
-from std_msgs.msg import String, Bool
+from std_msgs.msg import String, Bool, Float64MultiArray
 
 
 
@@ -62,7 +62,7 @@ class Impedance_control():
             self.go_static_test_pose()
             self.get_reference_pose(mode='static')
             self.subscribe_flag=0
-            self.Trajectory_listener = rospy.Subscriber('robot_trajectory',RobotTrajectory, self.decompose_trajectory)
+            self.Trajectory_listener = rospy.Subscriber('robot_trajectory',Float64MultiArray, self.decompose_trajectory)
         
         # rate=rospy.Rate(800) 
             
@@ -81,12 +81,11 @@ class Impedance_control():
         self.collision.set_ft_contact_collision_behaviour(torque_lower,torque_upper,
                                                           force_lower,force_upper)
     def decompose_trajectory(self,traj):
+        self.target_j_pos=traj
         self.subscribe_flag=1
-        self.traj_poses=traj.joint_trajectory.points
-        
+                
         #compute time to move to next pose
-        self.time = 1/(self.tra_update_rate*len(self.traj_poses))
-        self.pose_index=0
+        self.time = 1/self.tra_update_rate
         self.now=time.time()
 
     def get_reference_pose(self,mode):
@@ -99,12 +98,9 @@ class Impedance_control():
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
         
         if mode =='dynamic' and self.subscribe_flag==1:
-            if time.time()-self.now >= self.time and self.pose_index<len(self.traj_poses)-1:
-                    self.pose_index+=1
-                    self.now=time.time()
-            self.ref_pose=np.array(self.traj_poses[self.pose_index].positions).reshape(7,)
-            self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
-            # self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
+            self.ref_pose=np.array(self.target_j_pos).reshape(7,1)
+            #TODO check if joint velocity =0 is valid
+            self.ref_vel= np.array([0,0,0,0,0,0,0]).reshape(7,)
 
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
