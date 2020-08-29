@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import rospy
+import copy
 import moveit_commander
 from franka_interface import ArmInterface, GripperInterface
 from franka_moveit import PandaMoveGroupInterface 
@@ -9,9 +10,8 @@ import tf.transformations as tr
 import tf_conversions.posemath as pm
 
 #import rosmsg needed:
-from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
+from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped, PoseArray
 from  moveit_msgs.msg import RobotTrajectory
-import geometry_msgs.msg
 from moveit_commander.conversions import pose_to_list
 from std_msgs.msg import String, Bool
 
@@ -52,7 +52,7 @@ class Trajectory_Generator():
 
         self.T_bh= np.zeros([4,4])
         #publisher:
-        self.traj_publisher = rospy.Publisher('robot_trajectory',RobotTrajectory,queue_size=10)
+        self.traj_publisher = rospy.Publisher('robot_trajectory',PoseArray,queue_size=10)
 
         # self.go_standby_position()
         # rospy.sleep(2.0)
@@ -103,14 +103,28 @@ class Trajectory_Generator():
         
         #add waypoints in this trajectory
         waypoints=[]
-        #append only start/current and end/target pose for now
-        waypoints.append(cur_pose)
-        waypoints.append(target_pose)
+        #get 5 points between start/current and end/target pose for now
+        ite=5
+        xite=np.linspace(cur_pose.position.x,target_pose.position.x,ite)
+        yite=np.linspace(cur_pose.position.y,target_pose.position.y,ite)
+        zite=np.linspace(cur_pose.position.z,target_pose.position.z,ite)
+        qua_xite=np.linspace(cur_pose.orientation.x,target_pose.orientation.x,ite)
+        qua_yite=np.linspace(cur_pose.orientation.y,target_pose.orientation.y,ite)
+        qua_zite=np.linspace(cur_pose.orientation.z,target_pose.orientation.z,ite)
+        qua_wite=np.linspace(cur_pose.orientation.w,target_pose.orientation.w,ite)
 
-        #compute cartesian plan
-        traj_plan=RobotTrajectory()
-        (traj_plan,fraction)=self.arm_group.compute_cartesian_path(waypoints, 0.02, 0.0)
-        self.traj_publisher.publish(traj_plan)
+        for i in range(1,ite):
+            p=Pose()
+            p.position.x=xite[i]
+            p.position.y=yite[i]
+            p.position.z=zite[i]
+            p.orientation.x=qua_xite[i]
+            p.orientation.y=qua_yite[i]
+            p.orientation.z=qua_zite[i]
+            p.orientation.w=qua_wite[i]
+            waypoints.append(p)
+        
+        self.traj_publisher.publish(waypoints)
 
 
 

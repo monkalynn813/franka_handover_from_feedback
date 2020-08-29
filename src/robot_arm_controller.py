@@ -12,7 +12,7 @@ from trajectory_generator import msg_to_se3, se3_to_msg
 import time
 
 #import rosmsg needed:
-from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
+from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped, PoseArray
 from  moveit_msgs.msg import RobotTrajectory
 from moveit_commander.conversions import pose_to_list
 from std_msgs.msg import String, Bool
@@ -25,7 +25,7 @@ class Impedance_control():
         param:
         ptx,pty,ptz: translational stiffness at end-effector 
         pr: all rotatinal stiffness at end-effector
-        tra_update_rate: the update rate of the receiving trajectory
+        tra_update_rate: the update rate of the receiving trajectory (consistent with hand pose update rate)
         """
         #set stiffness:
         self.P = np.zeros([6,6])
@@ -61,8 +61,8 @@ class Impedance_control():
             #in case trajectory is not published yet
             self.go_static_test_pose()
             self.get_reference_pose(mode='static')
-            self.subscribe_flag=0.01
-            self.Trajectory_listener = rospy.Subscriber('robot_trajectory',RobotTrajectory, self.decompose_trajectory)
+            self.subscribe_flag=0
+            self.Trajectory_listener = rospy.Subscriber('robot_trajectory',PoseArray, self.decompose_trajectory)
         
         # rate=rospy.Rate(800) 
             
@@ -82,10 +82,10 @@ class Impedance_control():
                                                           force_lower,force_upper)
     def decompose_trajectory(self,traj):
         self.subscribe_flag=1
-        self.traj_poses=traj.joint_trajectory.points
+        self.traj_poses=traj
         
         #compute time to move to next pose
-        self.time = 1/(self.tra_update_rate*len(self.traj_poses))
+        self.period = 1/(self.tra_update_rate*len(self.traj_poses))
         self.pose_index=0
         self.now=time.time()
 
@@ -98,13 +98,24 @@ class Impedance_control():
             self.ref_pose=[ref_position,ref_orientation]
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
         
-        if mode =='dynamic' and self.subscribe_flag==1:
-            if time.time()-self.now >= self.time and self.pose_index<7:
+        if mode =='dynamic' and self.subscribe_flag ==1:
+            if time.time()-self.now >= self.period and self.pose_index<len(self.traj_poses-1):
                     self.pose_index+=1
                     self.now=time.time()
-            self.ref_pose=np.array(self.traj_poses[self.pose_index].positions).reshape(7,)
-            self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
 
+            target_pose=self.traj_poses[self.pose_index]
+            current_pose=se3_to_msg(self.limb.car_pose_trans_mat)
+            self.ref_pose=[target_pose.position,self.traj_pose.orientation]
+           
+            x_vel=(target_pose.position.x-current_pose.position.x)/self.period
+            y_vel=(target_pose.position.y-current_pose.position.y)/self.period
+            z_vel=(target_pose.position.z-current_pose.position.z)/self.period
+            qua_x_vel=(target_pose.orientation.x-current_pose.orientation.x)/self.period
+            qua_y_vel=(target_pose.orientation.y-current_pose.orientation.y)/self.period
+            qua_z_vel=(target_pose.orientation.z-current_pose.orientation.z)/self.period
+
+            self.ref_vel=np.array([x_vel,y_vel,z_vel,qua_x_vel,qua_y_vel,qua_z_vel]).reshape(6,)
+             # self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
 
