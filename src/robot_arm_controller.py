@@ -99,19 +99,20 @@ class Impedance_control():
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
         
         if mode =='dynamic' and self.subscribe_flag==1:
-            if time.time()-self.now >= self.time and self.pose_index<7:
+            if time.time()-self.now >= self.time and self.pose_index<len(self.traj_poses)-1:
                     self.pose_index+=1
                     self.now=time.time()
             self.ref_pose=np.array(self.traj_poses[self.pose_index].positions).reshape(7,)
             self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
+            # self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
 
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
 
-        T_standby=np.array([[-0.1815108 , -0.98090692,  0.06982443, -0.15],
-                            [ 0.00259123,  0.07052656,  0.99750654,  0.5],
-                            [-0.98338554,  0.18123914, -0.01025958,  0.5],
-                            [ 0.        ,  0.        ,  0.        ,  1. ]])
+        # T_standby=np.array([[-0.1815108 , -0.98090692,  0.06982443, -0.15],
+        #                     [ 0.00259123,  0.07052656,  0.99750654,  0.5],
+        #                     [-0.98338554,  0.18123914, -0.01025958,  0.5],
+        #                     [ 0.        ,  0.        ,  0.        ,  1. ]])
 
         T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
                         [ -1/sqrt(2), -1/sqrt(2), 0,   0],
