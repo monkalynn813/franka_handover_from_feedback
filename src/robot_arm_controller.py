@@ -82,10 +82,10 @@ class Impedance_control():
                                                           force_lower,force_upper)
     def decompose_trajectory(self,traj):
         self.subscribe_flag=1
-        self.traj_poses=traj
+        self.traj_poses=traj.poses
         
         #compute time to move to next pose
-        self.period = 1/(self.tra_update_rate*len(self.traj_poses))
+        self.period = 1./(self.tra_update_rate*len(self.traj_poses))
         self.pose_index=0
         self.now=time.time()
 
@@ -99,13 +99,13 @@ class Impedance_control():
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
         
         if mode =='dynamic' and self.subscribe_flag ==1:
-            if time.time()-self.now >= self.period and self.pose_index<len(self.traj_poses-1):
+            if time.time()-self.now >= self.period and self.pose_index<len(self.traj_poses)-1:
                     self.pose_index+=1
                     self.now=time.time()
 
             target_pose=self.traj_poses[self.pose_index]
             current_pose=se3_to_msg(self.limb.car_pose_trans_mat)
-            self.ref_pose=[target_pose.position,self.traj_pose.orientation]
+            self.ref_pose=[target_pose.position,target_pose.orientation]
            
             x_vel=(target_pose.position.x-current_pose.position.x)/self.period
             y_vel=(target_pose.position.y-current_pose.position.y)/self.period

@@ -124,7 +124,9 @@ class Trajectory_Generator():
             p.orientation.w=qua_wite[i]
             waypoints.append(p)
         
-        self.traj_publisher.publish(waypoints)
+        message=PoseArray()
+        message.poses=waypoints
+        self.traj_publisher.publish(message)
 
 
 
