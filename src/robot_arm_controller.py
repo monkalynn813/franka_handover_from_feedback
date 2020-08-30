@@ -103,8 +103,8 @@ class Impedance_control():
                     self.pose_index+=1
                     self.now=time.time()
             self.ref_pose=np.array(self.traj_poses[self.pose_index].positions).reshape(7,)
-            self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
-            # self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
+            # self.ref_vel=np.array(self.traj_poses[self.pose_index].velocities).reshape(7,)
+            self.ref_vel= np.array([0,0,0,0,0,0,0]).reshape(7,)
 
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
@@ -116,7 +116,7 @@ class Impedance_control():
 
         T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
                         [ -1/sqrt(2), -1/sqrt(2), 0,   0],
-                        [0,  0, -1,  0.52],
+                        [0,  0, -1,  0.54],
                         [ 0, 0, 0,  1 ]])
         target_pose= se3_to_msg(T_standby)
         self.arm_group.set_pose_target(target_pose)
