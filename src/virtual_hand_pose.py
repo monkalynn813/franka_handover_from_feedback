@@ -41,7 +41,7 @@ class hand_pose():
         #subscriber:
         # self.subscriber_name = rospy.Subscriber('topic_name',String, self.subscriber_callback)
 
-        rate=rospy.Rate(1)
+        rate=rospy.Rate(10)
         rospy.loginfo("-------press Enter to start generate virtual human hand pose-----")
         raw_input()
         while not rospy.is_shutdown():

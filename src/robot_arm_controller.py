@@ -81,7 +81,7 @@ class Impedance_control():
         self.collision.set_ft_contact_collision_behaviour(torque_lower,torque_upper,
                                                           force_lower,force_upper)
     def decompose_trajectory(self,traj):
-        self.target_j_pos=traj
+        self.target_j_pos=traj.data
         self.subscribe_flag=1
                 
         #compute time to move to next pose
@@ -98,7 +98,7 @@ class Impedance_control():
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
         
         if mode =='dynamic' and self.subscribe_flag==1:
-            self.ref_pose=np.array(self.target_j_pos).reshape(7,1)
+            self.ref_pose=np.array(self.target_j_pos).reshape(7,)
             #TODO check if joint velocity =0 is valid
             self.ref_vel= np.array([0,0,0,0,0,0,0]).reshape(7,)
 
@@ -112,7 +112,7 @@ class Impedance_control():
 
         T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
                         [ -1/sqrt(2), -1/sqrt(2), 0,   0],
-                        [0,  0, -1,  0.52],
+                        [0,  0, -1,  0.54],
                         [ 0, 0, 0,  1 ]])
         target_pose= se3_to_msg(T_standby)
         self.arm_group.set_pose_target(target_pose)

@@ -87,7 +87,9 @@ class Trajectory_Generator():
 
         joint_target,success=IKinSpace(self.Slist,self.M,target_pose,np.array(cur_joint_pos),0.01,0.005)
         if success:
-            self.traj_publisher.publish(list(joint_target))
+            message=Float64MultiArray()
+            message.data=joint_target
+            self.traj_publisher.publish(message)
         else:
             rospy.logwarn('Cannot solve IK frm current position')
     
