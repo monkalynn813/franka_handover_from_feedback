@@ -20,7 +20,7 @@ from std_msgs.msg import String, Bool, Float64MultiArray
 
 
 class Impedance_control():
-    def __init__(self,ptx=150,pty=150,ptz=150,pr=10,mode='static',tra_update_rate=1):
+    def __init__(self,ptx=100,pty=100,ptz=100,pr=10,mode='static',tra_update_rate=1):
         """
         param:
         ptx,pty,ptz: translational stiffness at end-effector 
@@ -33,7 +33,7 @@ class Impedance_control():
         #set damping: critical damp
         self.D= np.zeros([6,6])
         np.fill_diagonal(self.D,2*np.sqrt(np.diag(self.P)))
-        #TODO: set inertia
+        
         
 
         self.mode=mode
@@ -64,12 +64,15 @@ class Impedance_control():
             self.subscribe_flag=0
             self.Trajectory_listener = rospy.Subscriber('robot_trajectory',Float64MultiArray, self.decompose_trajectory)
         
-        # rate=rospy.Rate(800) 
-            
+        # start control loop 
+        self.previous_vel=[0.0]*7
+        self.previous_timestamp=time.time()
+        self.initial_acc_coeff=0
+
         while not rospy.is_shutdown():
             if mode == 'dynamic':
                 self.get_reference_pose(mode)
-            self.control_loop(self.ref_pose,self.ref_vel)
+            self.control_loop(self.ref_pose,self.ref_vel,self.ref_acc)
         #     # break
             # rate.sleep()
     def set_collisionBehavior(self):
@@ -96,11 +99,12 @@ class Impedance_control():
             
             self.ref_pose=[ref_position,ref_orientation]
             self.ref_vel= np.array([0,0,0,0,0,0]).reshape(6,)
+            self.ref_acc= np.array([0,0,0,0,0,0,0]).reshape(7,)
         
         if mode =='dynamic' and self.subscribe_flag==1:
             self.ref_pose=np.array(self.target_j_pos).reshape(7,)
-            #TODO check if joint velocity =0 is valid
             self.ref_vel= np.array([0,0,0,0,0,0,0]).reshape(7,)
+            self.ref_acc= np.array([0,0,0,0,0,0,0]).reshape(7,)
 
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
@@ -121,12 +125,15 @@ class Impedance_control():
         self.arm_group.clear_pose_targets()
         rospy.sleep(2.0)
     
-    def control_loop(self,ref_pose,ref_vel):
+    def control_loop(self,ref_pose,ref_vel,ref_acc):
         #get coriolis
         coriolis=self.limb.get_coriolis()
+        
 
         #get Jacobian
         J = self.limb.zero_jacobian()
+        #get mass inertia matrix
+        M = self.limb.joint_inertia_matrix()
         
         #in case get delta_joint_position; delta_joint_velocities; delta_joint_accelerations directly from the planner
         if type(ref_pose) != list:
@@ -150,9 +157,7 @@ class Impedance_control():
             delta_q_dot=(ref_vel-np.array(cur_joint_vel)).reshape(7,1)
             err_dot=np.dot(J,delta_q_dot).reshape(6,1)
 
-            #TODO: add internia term
-
-            
+                        
         else:
             ref_position=ref_pose[0]
             ref_orientation=ref_pose[1]
@@ -181,13 +186,20 @@ class Impedance_control():
             cur_ee_vel=np.dot(J,np.array(cur_joint_vel).reshape(7,1))
             err_dot=(ref_ee_vel-np.array(cur_ee_vel).reshape(6,)).reshape(6,1)
                        
-            #TODO compute deviation in acceleration
+        #compute deviation in acceleration
+        cur_timestamp=time.time()
+        cur_joint_acc=(np.array(cur_joint_vel)-np.array(self.previous_vel))/(cur_timestamp-self.previous_timestamp)
+        err_dotdot=np.array(ref_acc-cur_joint_acc).reshape(7,1)
 
-        wrench=np.dot(self.P,error) + np.dot(self.D, err_dot)
-        tau_task=np.dot(J.T,wrench)
+        wrench=np.dot(self.P,error) + np.dot(self.D, err_dot) 
+        tau_task=np.dot(J.T,wrench) + np.dot(M,err_dotdot)*self.initial_acc_coeff
             #add coriolis
         tau_command=list(tau_task.reshape(7,1)+coriolis.reshape(7,1))
         self.limb.set_joint_torques(dict(zip(self.joint_names,tau_command)))
+        
+        self.previous_vel=cur_joint_vel
+        self.previous_timestamp=cur_timestamp
+        self.initial_acc_coeff=1
 
 
 def main():
