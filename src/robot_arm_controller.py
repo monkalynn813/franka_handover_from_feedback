@@ -20,7 +20,7 @@ from std_msgs.msg import String, Bool, Float64MultiArray
 
 
 class Impedance_control():
-    def __init__(self,ptx=100,pty=100,ptz=100,pr=10,mode='static',tra_update_rate=1):
+    def __init__(self,ptx=80,pty=80,ptz=100,pr=20,mode='static',tra_update_rate=1):
         """
         param:
         ptx,pty,ptz: translational stiffness at end-effector 
@@ -33,8 +33,6 @@ class Impedance_control():
         #set damping: critical damp
         self.D= np.zeros([6,6])
         np.fill_diagonal(self.D,2*np.sqrt(np.diag(self.P)))
-        
-        
 
         self.mode=mode
         self.tra_update_rate=tra_update_rate
@@ -42,16 +40,13 @@ class Impedance_control():
         self.joint_names=['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
         self.limb = ArmInterface()
         
-        self.set_collisionBehavior()
-
-        
-        self.panda_moveit_wrap = PandaMoveGroupInterface()
-        self.arm_group=self.panda_moveit_wrap._arm_group
+        self.set_collisionBehavior()        
 
         if mode =='static':
+            self.panda_moveit_wrap = PandaMoveGroupInterface()
+            self.arm_group=self.panda_moveit_wrap._arm_group
             self.go_static_test_pose()
             self.get_reference_pose(mode)
-
 
         #publisher:
         # self.publisher_name = rospy.Publisher('topic_name',String)
@@ -59,22 +54,24 @@ class Impedance_control():
         #subscriber:
         if mode =='dynamic':
             #in case trajectory is not published yet
-            self.go_static_test_pose()
-            self.get_reference_pose(mode='static')
+            # self.go_static_test_pose()            
             self.subscribe_flag=0
             self.Trajectory_listener = rospy.Subscriber('robot_trajectory',Float64MultiArray, self.decompose_trajectory)
         
-        # start control loop 
+        #initialize variables for acc computation
         self.previous_vel=[0.0]*7
         self.previous_timestamp=time.time()
         self.initial_acc_coeff=0
 
+        rospy.spin()
+    def enable_controller(self):
+        self.get_reference_pose(mode='static')
+        # start control loop 
         while not rospy.is_shutdown():
-            if mode == 'dynamic':
-                self.get_reference_pose(mode)
+            if self.mode == 'dynamic':
+                self.get_reference_pose(self.mode)
             self.control_loop(self.ref_pose,self.ref_vel,self.ref_acc)
-        #     # break
-            # rate.sleep()
+
     def set_collisionBehavior(self):
         self.collision=CollisionBehaviourInterface()
         torque_lower=[100.0]*7
@@ -109,15 +106,11 @@ class Impedance_control():
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
 
-        # T_standby=np.array([[-0.1815108 , -0.98090692,  0.06982443, -0.15],
-        #                     [ 0.00259123,  0.07052656,  0.99750654,  0.5],
-        #                     [-0.98338554,  0.18123914, -0.01025958,  0.5],
-        #                     [ 0.        ,  0.        ,  0.        ,  1. ]])
+        T_standby=np.array([[ 0,            0,          1,  4.29282581e-01],
+                            [ -1/sqrt(2),  -1/sqrt(2),  0, 1.37536114e-04],
+                            [ 1/sqrt(2),    -1/sqrt(2), 0, 6.84969607e-01],
+                            [ 0,  0,  0, 1]])
 
-        T_standby=np.array([[1/sqrt(2) , -1/sqrt(2),  0, 0.31],
-                        [ -1/sqrt(2), -1/sqrt(2), 0,   0],
-                        [0,  0, -1,  0.54],
-                        [ 0, 0, 0,  1 ]])
         target_pose= se3_to_msg(T_standby)
         self.arm_group.set_pose_target(target_pose)
         self.arm_group.go(wait=True) 
@@ -199,18 +192,28 @@ class Impedance_control():
         
         self.previous_vel=cur_joint_vel
         self.previous_timestamp=cur_timestamp
-        self.initial_acc_coeff=1
+        self.initial_acc_coeff=0
 
+class Handover_poses():
+    def __init__(self):
+        self.joint_names=['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
+        self.limb = ArmInterface()
+    def go_standby_pose(self):
+        positions=[np.pi/2, -np.pi/4, 0, -3*np.pi/4,0,np.pi,np.pi/4]
+        self.limb.move_to_joint_positions(dict(zip(self.joint_names,positions)))
+    def go_pickup_pose(self):
+        positions=[0, -np.pi/2, 0, -np.pi,0,np.pi,np.pi/4]
+        self.limb.move_to_joint_positions(dict(zip(self.joint_names,positions)))
 
 def main():
     rospy.init_node("robot_arm_controller")
     try:
         impedance_ctrl=Impedance_control(mode='dynamic')  #if program run from init, otherwise put starting function
-        
+        impedance_ctrl.enable_controller()
     except rospy.ROSInterruptException:pass
         
 
-    rospy.spin()
+    # rospy.spin()
 if __name__ == '__main__':
 	main()
     
