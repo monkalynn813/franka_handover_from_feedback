@@ -1,0 +1,3 @@
+bool gripper_controller_switch
+---
+bool gripper_controller_status

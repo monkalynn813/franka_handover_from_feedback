@@ -10,6 +10,7 @@ from modern_robotics import IKinSpace
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
 from std_msgs.msg import Float64MultiArray
+from handover_controller.srv import enable_gripper_controller
 
 
 def msg_to_se3(msg):
@@ -66,7 +67,7 @@ class Trajectory_Generator():
 
         #publisher:
         self.traj_publisher = rospy.Publisher('robot_trajectory',Float64MultiArray,queue_size=10)
-
+        self.gripper_controller_switch=rospy.ServiceProxy('grippper_controller_switch',enable_gripper_controller)
         #subscriber:
         self.freq=freq
         self.rate=rospy.Rate(freq)
@@ -89,8 +90,12 @@ class Trajectory_Generator():
             self.T_rh=np.dot(np.linalg.inv(self.T_sr),T_sh)
             #call IK solution to pub target joint positions
             dis=self.get_current_distance(self.T_rh)
-            if dis<=self.dmax and dis>=self.dmin:
-                self.traj_to_target_pose(self.T_rh)
+            if dis<=self.dmax:
+                gripper_status=self.gripper_controller_switch(True)
+                if dis>=self.dmin:
+                    self.traj_to_target_pose(self.T_rh)
+                #TODO if dis<dmin: follow with speed
+
     def compute_hand_speed(self,hand_pose):
         dis=self.get_current_distance(self.T_rh)
         hand_pose_array=[]
@@ -98,8 +103,7 @@ class Trajectory_Generator():
         if dis <=1.0 and dis>=self.dmax+0.1:
             hand_pose_array.append(hand_pose)
             time+=self.freq
-        
-        
+        #TODO finish speed computation        
                    
     def traj_to_target_pose(self,hand_pose):   
         #compute distance:

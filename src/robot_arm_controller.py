@@ -1,22 +1,17 @@
 #!/usr/bin/env python
 import rospy
-import moveit_commander
-from franka_interface import ArmInterface, GripperInterface
+from franka_interface import ArmInterface
 from franka_moveit import PandaMoveGroupInterface 
 from franka_tools import CollisionBehaviourInterface
 from math import pi, sqrt
 import numpy as np
-import tf.transformations as tr
-import tf_conversions.posemath as pm
 from trajectory_generator import msg_to_se3, se3_to_msg
 import time
 
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
-from  moveit_msgs.msg import RobotTrajectory
-from moveit_commander.conversions import pose_to_list
 from std_msgs.msg import String, Bool, Float64MultiArray
-
+from handover_controller.srv import enable_torque_controller
 
 
 class Impedance_control():
@@ -47,6 +42,7 @@ class Impedance_control():
             self.arm_group=self.panda_moveit_wrap._arm_group
             self.go_static_test_pose()
             self.get_reference_pose(mode)
+            self.controller_switch=1
 
         #publisher:
         # self.publisher_name = rospy.Publisher('topic_name',String)
@@ -56,21 +52,37 @@ class Impedance_control():
             #in case trajectory is not published yet
             # self.go_static_test_pose()            
             self.subscribe_flag=0
+            self.controller_switch=0
             self.Trajectory_listener = rospy.Subscriber('robot_trajectory',Float64MultiArray, self.decompose_trajectory)
+            #build a server to get indicator to start torque controller
+            rospy.Service('torque_controller_switch',enable_torque_controller,self.controller_status)
         
         #initialize variables for acc computation
         self.previous_vel=[0.0]*7
         self.previous_timestamp=time.time()
         self.initial_acc_coeff=0
 
-        rospy.spin()
+        self.enable_controller()
+
+    def controller_status(self,indicator):
+        if indicator==1:
+            self.controller_switch = 1
+        else:
+            self.controller_switch = 0
+        return self.controller_switch
+            
     def enable_controller(self):
-        self.get_reference_pose(mode='static')
+        #avoiding the loop starts at some random poses
+        flag=True
         # start control loop 
-        while not rospy.is_shutdown():
+        while not rospy.is_shutdown() and self.controller_switch:
+            if flag:
+                self.get_reference_pose(mode='static')
+                rospy.loginfo('Enabling the impedance controller')
             if self.mode == 'dynamic':
                 self.get_reference_pose(self.mode)
             self.control_loop(self.ref_pose,self.ref_vel,self.ref_acc)
+            flag=False
 
     def set_collisionBehavior(self):
         self.collision=CollisionBehaviourInterface()
@@ -102,6 +114,7 @@ class Impedance_control():
             self.ref_pose=np.array(self.target_j_pos).reshape(7,)
             self.ref_vel= np.array([0,0,0,0,0,0,0]).reshape(7,)
             self.ref_acc= np.array([0,0,0,0,0,0,0]).reshape(7,)
+            self.subscribe_flag=0
 
     def go_static_test_pose(self):
         rospy.loginfo("--moving to static test pose---")
@@ -194,26 +207,15 @@ class Impedance_control():
         self.previous_timestamp=cur_timestamp
         self.initial_acc_coeff=0
 
-class Handover_poses():
-    def __init__(self):
-        self.joint_names=['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
-        self.limb = ArmInterface()
-    def go_standby_pose(self):
-        positions=[np.pi/2, -np.pi/4, 0, -3*np.pi/4,0,np.pi,np.pi/4]
-        self.limb.move_to_joint_positions(dict(zip(self.joint_names,positions)))
-    def go_pickup_pose(self):
-        positions=[0, -np.pi/2, 0, -np.pi,0,np.pi,np.pi/4]
-        self.limb.move_to_joint_positions(dict(zip(self.joint_names,positions)))
-
 def main():
     rospy.init_node("robot_arm_controller")
     try:
         impedance_ctrl=Impedance_control(mode='dynamic')  #if program run from init, otherwise put starting function
-        impedance_ctrl.enable_controller()
+
     except rospy.ROSInterruptException:pass
         
 
-    # rospy.spin()
+    rospy.spin()
 if __name__ == '__main__':
 	main()
     
