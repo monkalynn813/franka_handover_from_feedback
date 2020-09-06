@@ -28,7 +28,7 @@ class Gripper_controller():
         self.torque_controller_switch=rospy.ServiceProxy('torque_controller_switch',enable_torque_controller)
         rospy.Service('grippper_controller_switch',enable_gripper_controller,self.controller_status)
             
-        
+        self.experiment_loop()    
     def experiment_loop(self):
         #major experiment loop
         rate=rospy.Rate(100)

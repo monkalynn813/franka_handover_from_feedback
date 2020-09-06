@@ -6,6 +6,7 @@ import numpy as np
 import tf.transformations as tr
 import tf_conversions.posemath as pm
 from modern_robotics import IKinSpace
+import time
 
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
@@ -26,7 +27,7 @@ def se3_to_msg(T):
     return pm.toMsg(pm.fromMatrix(T))
 
 class Trajectory_Generator():
-    def __init__(self,dmin=0,dmax=0.1,freq=5):
+    def __init__(self,dmin=0,dmax=0.1,freq=10):
         """
         arguments:
             dmin: the distance indicates robot to move along with virtual human hand position
@@ -87,24 +88,36 @@ class Trajectory_Generator():
     def compute_target_pose(self,hand_pose):
         if self.T_sr.any() != np.zeros([4,4]).any():
             T_sh=msg_to_se3(hand_pose)
-            self.T_rh=np.dot(np.linalg.inv(self.T_sr),T_sh)
+            T_rh=np.dot(np.linalg.inv(self.T_sr),T_sh)
+            dis=self.get_current_distance(T_rh)
+            #get speed of human hand within certain distance measurement and assume it to be constant
+            speed=self.compute_hand_speed(dis)
+            if speed:
+                rospy.loginfo("Hand speed is %0.3f m/s" %speed)
+                #TODO send speed to policy
             #call IK solution to pub target joint positions
-            dis=self.get_current_distance(self.T_rh)
             if dis<=self.dmax:
                 gripper_status=self.gripper_controller_switch(True)
                 if dis>=self.dmin:
-                    self.traj_to_target_pose(self.T_rh)
-                #TODO if dis<dmin: follow with speed
+                    self.traj_to_target_pose(T_rh)
+                # TODO elif dis<dmin: 
+               
+        
+    def compute_hand_speed(self,dis):
+        epsilon=0.01
+        measure_pt1=1.5 #m
+        measure_pt2=0.8 #m
+        speed=None
+        if dis>= measure_pt1-epsilon and dis<=measure_pt1+epsilon:
+            self.measure_timestp1=time.time()
+        if dis>=measure_pt2-epsilon and dis<=measure_pt2+epsilon and 'self.meaure_timestp1' in locals() :
+            measure_timestp2=time.time()
+            speed=(measure_pt1-measure_pt2)/(measure_timestp2-self.measure_timestp1)
+            del self.measure_timestp1
+            del measure_timestp2
+        return speed
 
-    def compute_hand_speed(self,hand_pose):
-        dis=self.get_current_distance(self.T_rh)
-        hand_pose_array=[]
-        time=0
-        if dis <=1.0 and dis>=self.dmax+0.1:
-            hand_pose_array.append(hand_pose)
-            time+=self.freq
-        #TODO finish speed computation        
-                   
+        
     def traj_to_target_pose(self,hand_pose):   
         #compute distance:
         cur_joint_pos=[]
@@ -113,12 +126,32 @@ class Trajectory_Generator():
         for name in self.joint_names:
             cur_joint_pos.append(cur_q[name]) 
         hand_position=hand_pose[:3,3]
+        x=hand_position[0]
+        y=hand_position[1]
+        z=hand_position[2]
         #set target ee pose
-        #TODO more detail needed for robot hand pose relative to human hand
-        target_pose=np.array([[ 0,            0,          1,  hand_position[0]-0.05],
-                              [ -1/sqrt(2),  -1/sqrt(2),  0,  hand_position[1]],
-                              [ 1/sqrt(2),    -1/sqrt(2), 0,  hand_position[2]],
-                              [ 0,  0,  0, 1]])
+        #normalize hand position x,y for z screw axis of target pose
+        zscrew_x=x/np.linalg.norm((x,y))
+        zscrew_y=y/np.linalg.norm((x,y))
+        zscrew=np.array([zscrew_x,zscrew_y,0])
+        #make sure gripper is always flat
+        xscrew=np.array([0,0,1]) 
+        yscrew=np.cross(zscrew,xscrew)
+        theta=pi/4
+        Rrot=np.array([[np.cos(theta), -np.sin(theta), 0],
+                       [np.sin(theta), np.cos(theta),  0],
+                       [0,              0,             1]])
+        #matain certain distance between hand and gripper
+        l=0.05
+        
+        R=np.array([[ xscrew[0],    yscrew[0],  zscrew_x],
+                    [ xscrew[1],    yscrew[1],  zscrew_y],
+                    [ xscrew[2],    yscrew[2],  0,      ]])
+        #rotate along z axis of the gripper frame by 45 degree
+        target_rotM=np.dot(R,Rrot)
+
+        target_pose=np.append(target_rotM,[[0,0,0]],axis=0)
+        target_pose=np.append(target_pose,np.array([[x-l*zscrew_x,y-l*zscrew_y,z,1]]).reshape(4,1),axis=1)
 
         joint_target,success=IKinSpace(self.Slist,self.M,target_pose,np.array(cur_joint_pos),0.01,0.005)
         if success:
@@ -127,8 +160,6 @@ class Trajectory_Generator():
             self.traj_publisher.publish(message)
         else:
             rospy.logwarn('Cannot solve IK frm current position')
-
-
 
     def get_current_distance(self,hand_pose):
         #compute current distance between human hand and end-effector
