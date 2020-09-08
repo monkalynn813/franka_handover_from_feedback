@@ -15,7 +15,7 @@ from handover_controller.srv import enable_torque_controller
 
 
 class Impedance_control():
-    def __init__(self,ptx=80,pty=80,ptz=100,pr=20,mode='static',tra_update_rate=1):
+    def __init__(self,ptx=50,pty=50,ptz=80,pr=10,mode='static',tra_update_rate=1):
         """
         param:
         ptx,pty,ptz: translational stiffness at end-effector 
@@ -54,7 +54,7 @@ class Impedance_control():
             self.subscribe_flag=0
             self.controller_switch=0
             self.Trajectory_listener = rospy.Subscriber('robot_trajectory',Float64MultiArray, self.decompose_trajectory)
-            #build a server to get indicator to start torque controller
+            #build a server to get indicator for enabling torque controller
             rospy.Service('torque_controller_switch',enable_torque_controller,self.controller_status)
         
         #initialize variables for acc computation
@@ -65,24 +65,28 @@ class Impedance_control():
         self.enable_controller()
 
     def controller_status(self,indicator):
+        indicator=indicator.torque_controller_switch
         if indicator==1:
             self.controller_switch = 1
         else:
             self.controller_switch = 0
+            rospy.loginfo('Disabling the impedance controller')
         return self.controller_switch
             
     def enable_controller(self):
         #avoiding the loop starts at some random poses
         flag=True
         # start control loop 
-        while not rospy.is_shutdown() and self.controller_switch:
-            if flag:
-                self.get_reference_pose(mode='static')
-                rospy.loginfo('Enabling the impedance controller')
-            if self.mode == 'dynamic':
-                self.get_reference_pose(self.mode)
-            self.control_loop(self.ref_pose,self.ref_vel,self.ref_acc)
-            flag=False
+        while not rospy.is_shutdown():
+            if self.controller_switch:
+                if flag:
+                    self.get_reference_pose(mode='static')
+                    rospy.loginfo('Enabling the impedance controller')
+                if self.mode == 'dynamic':
+                    self.get_reference_pose(self.mode)
+                self.control_loop(self.ref_pose,self.ref_vel,self.ref_acc)
+                flag=False
+            else: continue
 
     def set_collisionBehavior(self):
         self.collision=CollisionBehaviourInterface()

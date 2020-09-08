@@ -27,7 +27,7 @@ def se3_to_msg(T):
     return pm.toMsg(pm.fromMatrix(T))
 
 class Trajectory_Generator():
-    def __init__(self,dmin=0,dmax=0.1,freq=10):
+    def __init__(self,dmin=0.18,dmax=0.32,freq=10):
         """
         arguments:
             dmin: the distance indicates robot to move along with virtual human hand position
@@ -72,6 +72,8 @@ class Trajectory_Generator():
         #subscriber:
         self.freq=freq
         self.rate=rospy.Rate(freq)
+        self.measure_timestp1=None
+        self.gripper_flag=False
         while not rospy.is_shutdown():
             robot_pose_= rospy.wait_for_message('vrpn_client_node/robot_pose/pose',PoseStamped)
             hand_pose_ = rospy.wait_for_message('vrpn_client_node/hand_pose/pose',PoseStamped)
@@ -90,6 +92,7 @@ class Trajectory_Generator():
             T_sh=msg_to_se3(hand_pose)
             T_rh=np.dot(np.linalg.inv(self.T_sr),T_sh)
             dis=self.get_current_distance(T_rh)
+            # print(dis)
             #get speed of human hand within certain distance measurement and assume it to be constant
             speed=self.compute_hand_speed(dis)
             if speed:
@@ -97,24 +100,31 @@ class Trajectory_Generator():
                 #TODO send speed to policy
             #call IK solution to pub target joint positions
             if dis<=self.dmax:
-                gripper_status=self.gripper_controller_switch(True)
+                
                 if dis>=self.dmin:
                     self.traj_to_target_pose(T_rh)
-                # TODO elif dis<dmin: 
+                elif dis<self.dmin and not self.gripper_flag: 
+                    try:
+                        gripper_status=self.gripper_controller_switch(True)
+                        self.gripper_flag=True
+                    except: pass
                
         
     def compute_hand_speed(self,dis):
-        epsilon=0.01
+        epsilon=0.05
         measure_pt1=1.5 #m
         measure_pt2=0.8 #m
         speed=None
+        
         if dis>= measure_pt1-epsilon and dis<=measure_pt1+epsilon:
+            # print('reach the first measurement point')
             self.measure_timestp1=time.time()
-        if dis>=measure_pt2-epsilon and dis<=measure_pt2+epsilon and 'self.meaure_timestp1' in locals() :
+        if dis>=measure_pt2-epsilon and dis<=measure_pt2+epsilon and self.measure_timestp1 is not None:
+            # print('reach the second measurement point')
             measure_timestp2=time.time()
             speed=(measure_pt1-measure_pt2)/(measure_timestp2-self.measure_timestp1)
-            del self.measure_timestp1
-            del measure_timestp2
+            self.measure_timestp1 = None
+            measure_timestp2 = None
         return speed
 
         
@@ -142,7 +152,7 @@ class Trajectory_Generator():
                        [np.sin(theta), np.cos(theta),  0],
                        [0,              0,             1]])
         #matain certain distance between hand and gripper
-        l=0.05
+        l=0.1
         
         R=np.array([[ xscrew[0],    yscrew[0],  zscrew_x],
                     [ xscrew[1],    yscrew[1],  zscrew_y],
@@ -158,6 +168,7 @@ class Trajectory_Generator():
             message=Float64MultiArray()
             message.data=joint_target
             self.traj_publisher.publish(message)
+            # print('following')
         else:
             rospy.logwarn('Cannot solve IK frm current position')
 
