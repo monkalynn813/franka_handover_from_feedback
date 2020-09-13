@@ -92,9 +92,9 @@ class Gripper_controller():
         rospy.sleep(1.0)
         neutral=[-1.0165762574168886e-05, -0.7850608562837568, 0.000556157004417989, -2.356243464252405, 0.0007990042751352085, 1.572437513430913, 0.7852157028276059]
         self.limb.move_to_joint_positions(dict(zip(self.joint_names,neutral)),use_moveit=False)
-
-        self.limb.move_to_joint_positions(dict(zip(self.joint_names,standby_positions)))
-        rospy.sleep(2.0)
+        rospy.sleep(1.0)
+        self.limb.move_to_joint_positions(dict(zip(self.joint_names,standby_positions)),use_moveit=False)
+        rospy.sleep(1.0)
         
 
     def set_slope_parameter(self,slope):
