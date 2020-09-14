@@ -27,7 +27,7 @@ def se3_to_msg(T):
     return pm.toMsg(pm.fromMatrix(T))
 
 class Trajectory_Generator():
-    def __init__(self,dmin=0.18,dmax=0.32,freq=10):
+    def __init__(self,dmin=0,dmax=0.32,freq=10):
         """
         arguments:
             dmin: the distance indicates robot to move along with virtual human hand position
@@ -88,9 +88,10 @@ class Trajectory_Generator():
         self.T_sr=np.dot(T_sr_,self.T_r_r)
         
     def compute_target_pose(self,hand_pose):
-        if self.T_sr.any() != np.zeros([4,4]).any():
+        if self.T_sr.any() != np.zeros([4,4]).any():    
             T_sh=msg_to_se3(hand_pose)
             T_rh=np.dot(np.linalg.inv(self.T_sr),T_sh)
+
             dis=self.get_current_distance(T_rh)
             # print(dis)
             #get speed of human hand within certain distance measurement and assume it to be constant
@@ -99,8 +100,7 @@ class Trajectory_Generator():
                 rospy.loginfo("Hand speed is %0.3f m/s" %speed)
                 #TODO send speed to policy
             #call IK solution to pub target joint positions
-            if dis<=self.dmax:
-                
+            if dis<=self.dmax:               
                 if dis>=self.dmin:
                     self.traj_to_target_pose(T_rh)
                 elif dis<self.dmin and not self.gripper_flag: 
@@ -128,7 +128,8 @@ class Trajectory_Generator():
         return speed
 
         
-    def traj_to_target_pose(self,hand_pose):   
+    def traj_to_target_pose(self,hand_pose): 
+        # rospy.loginfo('following')  
         #compute distance:
         cur_joint_pos=[]
         #get current joint position
