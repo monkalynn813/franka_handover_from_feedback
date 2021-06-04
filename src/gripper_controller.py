@@ -2,11 +2,24 @@
 import rospy
 from franka_interface import GripperInterface, ArmInterface
 import numpy as np
+import os , sys, select, tty, termios
+import time
 #import rosmsg needed:
 from std_msgs.msg import String
 from handover_controller.srv import enable_torque_controller
 from handover_controller.srv import enable_gripper_controller
+from create_webclient import read_to_file
 
+read_to_file()
+#load current policy sample:
+sample_path ='/home/jingyan/Documents/handover_franka/handover_control_ws/src/handover_controller/sample/'
+filename = 'sample.csv'
+delimiter = ','
+data=np.loadtxt(sample_path+filename,delimiter=delimiter)
+dmax= data[0]
+dmin = data[1]
+lx = data[2]
+ly = data[3]
 
 
 class Gripper_controller():
@@ -17,21 +30,21 @@ class Gripper_controller():
         self.width=width
 
         self.load_force_joint='panda_joint6'
-        self.k=0.5
-        self.F_ovl=30
-
+        self.k=5.0
         self.limb.set_joint_position_speed(0.08)
         #publisher:
         # self.publisher_name = rospy.Publisher('topic_name',String)
 
         #subscriber:
         # self.subscriber_name = rospy.Subscriber('topic_name',String, self.subscriber_callback)
-        self.controller_switch=True
+        self.controller_switch=False
         self.torque_controller_switch=rospy.ServiceProxy('torque_controller_switch',enable_torque_controller)
         rospy.Service('grippper_controller_switch',enable_gripper_controller,self.controller_status)
             
         self.experiment_loop()    
     def experiment_loop(self):
+        self.initialization()
+        read_to_file()
         #major experiment loop
         rate=rospy.Rate(50)
         epsilon=0.01
@@ -39,22 +52,23 @@ class Gripper_controller():
         self.pick_and_standby()
         try:
             impedance_status=self.torque_controller_switch(1)
-        except:pass
+            os.system('play -nq -t alsa synth {} sine {}'.format(0.07,1000))
+        except Exception as e:
+            rospy.logwarn(e)
         rospy.sleep(2.0)
-        self.zero_load=self.limb.joint_effort(self.load_force_joint)
+        self.zero_load=self.read_baseline(2.0)
         rospy.sleep(2.0)
-        # self.test_handover_position()
-        # self.calibration()
-        # raw_input('---place bottle in the gripper position for test purpose----') 
 
-        while not rospy.is_shutdown() and self.controller_switch:
-            self.command_position()  
+        while not rospy.is_shutdown():
+            if self.controller_switch:
+                self.command_position()  
             #detect if handover task has finished
-            # if self.fwid > (self.width + epsilon):
-            #     rospy.loginfo('------Handover Task Finished------')
-            #     self.initialization()
-            #     raw_input('Press Enter to start next round of the experiment')
-            #     self.experiment_loop()
+            key=getKey()
+            if key == '0':
+                rospy.loginfo('------Handover Task Finished------')
+                
+                raw_input('Press Enter to start next round of the experiment')
+                self.experiment_loop()
             
             rate.sleep()
 
@@ -62,14 +76,23 @@ class Gripper_controller():
         self.gripper.stop_action()
         try:
             impedance_status=self.torque_controller_switch(0)
-        except:pass
+        except Exception as e:
+            rospy.logwarn(e)
         
         self.controller_switch=False
+    def read_baseline(self,sec):
+        now = time.time()
+        read =[]
+        while time.time() <= now + sec:
+            read.append(self.limb.joint_effort(self.load_force_joint))
+        
+        a = np.average(read)
+        return a
     
-
     def controller_status(self,req):
         if req.gripper_controller_switch:
             self.controller_switch= True
+            os.system('play -nq -t alsa synth {} sine {}'.format(0.09,500))
             rospy.loginfo('Enabling the gripper position controller')
         else:
             self.controller_switch= False
@@ -95,34 +118,13 @@ class Gripper_controller():
         rospy.sleep(1.0)
         self.limb.move_to_joint_positions(dict(zip(self.joint_names,standby_positions)),use_moveit=False)
         rospy.sleep(1.0)
-        
-
-    def set_slope_parameter(self,slope):
-        self.k=slope
-    
-    def calibration(self):
-        
-        try:
-            impedance_status=self.torque_controller_switch(1)
-        except:pass
-        rospy.sleep(2.0)
-
-        self.zero_load=self.limb.joint_effort(self.load_force_joint)
-        try:
-            impedance_status=self.torque_controller_switch(0)
-        except:pass
-        rospy.sleep(2.0)
-
-
+            
     def get_current_load(self):       
         cur_read=self.limb.joint_effort(self.load_force_joint)
         cur_load=cur_read-self.zero_load
+        if abs(cur_load) < 1.5:
+            cur_load = 0
         return cur_load
-    def command_force(self):
-        #Fl is positive when grasp something
-        Fl=self.get_current_load()
-        Fg=self.k*Fl+self.F_ovl
-        self.gripper.grasp(self.width,Fg,epsilon_inner=0.05,epsilon_outer=0.05,wait_for_result=False)
     def command_position(self):
         #Fl is positive when grasp something
         Fl=self.get_current_load()
@@ -145,7 +147,17 @@ class Gripper_controller():
         joint_names=['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
         positions=[0, -np.pi/4, 0, -3*np.pi/4,0,np.pi,np.pi/4]
         self.limb.move_to_joint_positions(dict(zip(joint_names,positions)))
-    
+def getKey():
+
+    tty.setraw(sys.stdin.fileno())
+    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+    if rlist:
+        key = sys.stdin.read(1)
+    else:
+        key = ''
+
+    termios.tcsetattr(sys.stdin, termios.TCSADRAIN, termios.tcgetattr(sys.stdin))
+    return key    
 def main():
     rospy.init_node("gripper_controller")
     try:
@@ -157,4 +169,4 @@ def main():
     rospy.spin()
 if __name__ == '__main__':
 	main()
-    
+  

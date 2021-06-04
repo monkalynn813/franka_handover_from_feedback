@@ -8,14 +8,24 @@ import numpy as np
 from trajectory_generator import msg_to_se3, se3_to_msg
 import time
 
+
 #import rosmsg needed:
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
 from std_msgs.msg import String, Bool, Float64MultiArray
 from handover_controller.srv import enable_torque_controller
 
+#load current policy sample:
+sample_path ='/home/jingyan/Documents/handover_franka/handover_control_ws/src/handover_controller/sample/'
+filename = 'sample.csv'
+delimiter = ','
+data=np.loadtxt(sample_path+filename,delimiter=delimiter)
+dmax= data[0]
+dmin = data[1]
+lx= data[2]
+ly= data[3]
 
 class Impedance_control():
-    def __init__(self,ptx=50,pty=50,ptz=80,pr=10,mode='static',tra_update_rate=1):
+    def __init__(self,ptx=40,pty=40,ptz=70,pr=10,mode='static',tra_update_rate=1):
         """
         param:
         ptx,pty,ptz: translational stiffness at end-effector 
@@ -100,10 +110,6 @@ class Impedance_control():
         self.target_j_pos=traj.data
         self.subscribe_flag=1
                 
-        #compute time to move to next pose
-        self.time = 1/self.tra_update_rate
-        self.now=time.time()
-
     def get_reference_pose(self,mode):
         #target_pose= geometry_msgs/Pose
         if mode=='static':
@@ -143,7 +149,7 @@ class Impedance_control():
         #get Jacobian
         J = self.limb.zero_jacobian()
         #get mass inertia matrix
-        M = self.limb.joint_inertia_matrix()
+        # M = self.limb.joint_inertia_matrix()
         
         #in case get delta_joint_position; delta_joint_velocities; delta_joint_accelerations directly from the planner
         if type(ref_pose) != list:
@@ -197,18 +203,18 @@ class Impedance_control():
             err_dot=(ref_ee_vel-np.array(cur_ee_vel).reshape(6,)).reshape(6,1)
                        
         #compute deviation in acceleration
-        cur_timestamp=time.time()
-        cur_joint_acc=(np.array(cur_joint_vel)-np.array(self.previous_vel))/(cur_timestamp-self.previous_timestamp)
-        err_dotdot=np.array(ref_acc-cur_joint_acc).reshape(7,1)
+        # cur_timestamp=time.time()
+        # cur_joint_acc=(np.array(cur_joint_vel)-np.array(self.previous_vel))/(cur_timestamp-self.previous_timestamp)
+        # err_dotdot=np.array(ref_acc-cur_joint_acc).reshape(7,1)
 
         wrench=np.dot(self.P,error) + np.dot(self.D, err_dot) 
-        tau_task=np.dot(J.T,wrench) + np.dot(M,err_dotdot)*self.initial_acc_coeff
+        tau_task=np.dot(J.T,wrench)# + np.dot(M,err_dotdot)*self.initial_acc_coeff
             #add coriolis
         tau_command=list(tau_task.reshape(7,1)+coriolis.reshape(7,1))
         self.limb.set_joint_torques(dict(zip(self.joint_names,tau_command)))
         
         self.previous_vel=cur_joint_vel
-        self.previous_timestamp=cur_timestamp
+        # self.previous_timestamp=cur_timestamp
         self.initial_acc_coeff=0
 
 def main():
